@@ -16,3 +16,4 @@ node_modules/
 Lab1/Publisher/dist/
 *.tsbuildinfo
 npm-debug.log*
+Theory.MD
