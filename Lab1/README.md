@@ -18,8 +18,47 @@ started in any order. Both clients reconnect automatically if the broker restart
 
 ## Quick start: one command
 
-With Docker Desktop installed, one script builds and starts everything: the broker, the
-publisher web UI (opened in your browser), and four receivers:
+With Docker Desktop installed, one script builds and starts the broker and the publisher web
+UI (opened in your browser). The script's window then becomes a prompt where **you create
+receivers while everything runs**. Each receiver opens in its own window.
+
+**Windows:** double-click `start.cmd`, or run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File start.ps1                  # build, then start
+powershell -ExecutionPolicy Bypass -File start.ps1 -SkipBuild       # start without rebuilding
+powershell -ExecutionPolicy Bypass -File start.ps1 -DemoReceivers   # also start 4 demo receivers
+powershell -ExecutionPolicy Bypass -File start.ps1 -Stop            # stop everything
+```
+
+**macOS / Linux / Git Bash:**
+
+```bash
+sh start.sh                     # build, then start
+sh start.sh --skip-build        # start without rebuilding
+sh start.sh --demo-receivers    # also start 4 demo receivers
+sh start.sh --no-windows        # everything in this terminal (e.g. over SSH)
+```
+
+### Creating receivers at runtime
+
+Type these at the script's `>` prompt:
+
+| Command | What it does |
+|---|---|
+| `add <name> <topics>` | Creates a receiver in a new window, e.g. `add carol weather` or `add dave news,sports,weather` |
+| `stop <name>` | Stops that receiver. The broker keeps the messages it misses. |
+| `list` | Shows the running receivers and their topics |
+| `quit` | Stops everything (Ctrl+C does too in `start.sh`) |
+
+The name is the receiver's id. Using `add` again with the **same name** after `stop` brings the
+receiver back and replays the messages it missed. That is the offline-replay demo. A new name
+starts fresh.
+
+A receiver can also be stopped with Ctrl+C in its own window, and started again there: type
+`Start-Receiver` and press Enter on Windows, or just press Enter on macOS and Linux.
+
+`-DemoReceivers` / `--demo-receivers` starts these four at once:
 
 | Receiver | Topics | Shows |
 |---|---|---|
@@ -28,31 +67,15 @@ publisher web UI (opened in your browser), and four receivers:
 | `carol` | `weather` | Subscribing before any publisher exists: add `publisher-weather` / `weather` in the UI and she starts receiving |
 | `dave` | `news`, `sports`, `weather` | Fan-out: he gets a copy of everything |
 
-To change which receivers start, edit the `$receivers` list at the top of `start.ps1`, or
-`RECEIVERS` in `start.sh`.
+### Where the windows open
 
-**Windows:** double-click `start.cmd`, or run:
+The broker's log, including `[DLQ]` lines, opens in its own window. With Windows Terminal as the
+default terminal, the log and receiver windows open as tabs. `start.ps1` starts Docker Desktop
+if it isn't running.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File start.ps1              # build, then start
-powershell -ExecutionPolicy Bypass -File start.ps1 -SkipBuild   # start without rebuilding
-powershell -ExecutionPolicy Bypass -File start.ps1 -Stop        # stop everything
-```
-
-The script starts Docker Desktop if it isn't running. It opens one window for the broker's
-log and one window per receiver. To demonstrate offline replay, press Ctrl+C in Bob's window,
-send a few `news` messages, then press Up and Enter in that window to start Bob again. Press
-Enter in the script's own window to stop everything.
-
-**macOS / Linux / Git Bash:**
-
-```bash
-sh start.sh                  # add --skip-build to start without rebuilding
-```
-
-This follows the broker's and all receivers' logs in the same terminal, with each line
-prefixed by its source (`broker |`, `alice |`, `bob |`, …). Ctrl+C stops everything. The replay demo commands
-are printed when it starts.
+On macOS the windows are Terminal windows. On Linux they use gnome-terminal, konsole,
+xfce4-terminal or xterm. If no window can be opened, or with `--no-windows`, everything runs in
+the script's terminal, with each log line prefixed by its source (`broker |`, `carol |`, …).
 
 Then try the steps in [What to try](#what-to-try-feature-walkthrough).
 
