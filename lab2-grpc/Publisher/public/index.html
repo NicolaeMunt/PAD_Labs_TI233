@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Publisher Console (gRPC)</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --surface-2: #f0f2f5;
+    --border: #dde1e7;
+    --text: #1d2330;
+    --muted: #677084;
+    --accent: #2f5bd3;
+    --accent-text: #ffffff;
+    --ok: #1f8a4c;
+    --ok-bg: #e3f4ea;
+    --warn: #9a6400;
+    --warn-bg: #fdf1d8;
+    --bad: #c23434;
+    --bad-bg: #fbe5e5;
+    --info: #2f5bd3;
+    --info-bg: #e5ecfb;
+    --idle: #677084;
+    --idle-bg: #eceef2;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b;
+      --surface: #1b1f27;
+      --surface-2: #222733;
+      --border: #313848;
+      --text: #e4e7ee;
+      --muted: #9199ab;
+      --accent: #6d8ff0;
+      --accent-text: #0e1320;
+      --ok: #5fd08f;
+      --ok-bg: #173325;
+      --warn: #f0bd5a;
+      --warn-bg: #362a12;
+      --bad: #f07b7b;
+      --bad-bg: #3a1c1f;
+      --info: #8ea9f5;
+      --info-bg: #1e2a47;
+      --idle: #9199ab;
+      --idle-bg: #262b36;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 24px;
+    padding: 16px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  h1 { font-size: 18px; margin: 0; }
+  h1 small { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 4px; }
+  .sub { color: var(--muted); }
+  .live { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+  .live.on .dot { background: var(--ok); }
+  .live.off .dot { background: var(--bad); }
+  main { padding: 20px 24px 40px; max-width: 1500px; margin: 0 auto; }
+
+  form.add {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: end;
+    padding: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  label input { width: 100%; }
+  input, select, button {
+    font: inherit;
+    color: inherit;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 7px 10px;
+    background: var(--surface);
+    min-width: 0;
+  }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { cursor: pointer; background: var(--surface-2); white-space: nowrap; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.icon { padding: 2px 8px; background: none; border-color: transparent; color: var(--muted); font-size: 18px; line-height: 1; }
+  button.icon:hover { color: var(--bad); }
+
+  details.tips { margin: 14px 0 18px; color: var(--muted); }
+  details.tips summary { cursor: pointer; }
+  details.tips ol { margin: 8px 0 0; padding-left: 20px; }
+  details.tips li { margin: 3px 0; }
+  code { font-family: var(--mono); font-size: 12.5px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 16px; }
+  .empty { color: var(--muted); padding: 32px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px 4px; }
+  .pid { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topic { font-family: var(--mono); font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--border); }
+  .badge { margin-left: auto; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 99px; }
+  .detail { padding: 0 14px 10px; color: var(--muted); font-size: 12.5px; min-height: 1.45em; }
+
+  .s-registered { color: var(--ok); background: var(--ok-bg); }
+  .s-connecting, .s-registering { color: var(--info); background: var(--info-bg); }
+  .s-disconnected { color: var(--warn); background: var(--warn-bg); }
+  .s-rejected { color: var(--bad); background: var(--bad-bg); }
+  .s-stopped { color: var(--idle); background: var(--idle-bg); }
+
+  .composer { display: flex; gap: 8px; padding: 0 14px; }
+  .composer input { flex: 1; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px 12px; border-bottom: 1px solid var(--border); }
+  .invalid-group { display: flex; gap: 6px; flex: 1 1 240px; }
+  .invalid-group select { flex: 1; }
+
+  .counts { display: flex; gap: 14px; padding: 8px 14px; font-size: 12px; color: var(--muted); background: var(--surface-2); border-bottom: 1px solid var(--border); }
+  .counts b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  ol.log { list-style: none; margin: 0; padding: 0; max-height: 340px; overflow-y: auto; }
+  ol.log li { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; padding: 7px 14px; border-bottom: 1px solid var(--border); }
+  ol.log li:last-child { border-bottom: 0; }
+  ol.log .empty-log { display: block; color: var(--muted); text-align: center; padding: 20px; }
+  .time { color: var(--muted); font-family: var(--mono); font-size: 12px; padding-top: 1px; }
+  .payload { overflow-wrap: anywhere; }
+  .raw .payload { font-style: italic; }
+  .mid { grid-column: 2 / 4; color: var(--muted); font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+  .reason { grid-column: 2 / 4; color: var(--bad); font-size: 12.5px; }
+  .pill { font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 99px; align-self: start; }
+  .m-acked { color: var(--ok); background: var(--ok-bg); }
+  .m-sent { color: var(--info); background: var(--info-bg); }
+  .m-queued { color: var(--warn); background: var(--warn-bg); }
+  .m-rejected { color: var(--bad); background: var(--bad-bg); }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 20px;
+    transform: translateX(-50%);
+    max-width: calc(100% - 32px);
+    padding: 10px 16px;
+    border-radius: 8px;
+    background: var(--bad);
+    color: #fff;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.2);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .toast.show { opacity: 1; }
+
+  @media (max-width: 600px) {
+    header, main { padding-left: 16px; padding-right: 16px; }
+    form.add label { flex: 1 1 140px; }
+    form.add button { flex: 1 1 100%; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Publisher Console <small>gRPC</small></h1>
+    <div class="sub">Broker <code id="broker">…</code> over gRPC</div>
+  </div>
+  <div class="live" id="live"><span class="dot"></span><span id="live-text">Connecting to UI server…</span></div>
+</header>
+
+<main>
+  <form class="add" id="add-form">
+    <label>Publisher id <input name="publisherId" required placeholder="publisher-news" autocomplete="off"></label>
+    <label>Topic <input name="topic" required placeholder="news" autocomplete="off"></label>
+    <button class="primary" type="submit">+ Add publisher</button>
+  </form>
+
+  <details class="tips">
+    <summary>What to try</summary>
+    <ol>
+      <li>Add <code>publisher-news</code> on <code>news</code> and start a Receiver on <code>news</code>. Send a message: it goes <em>queued → sent → acked</em> and the Receiver prints it.</li>
+      <li>Add <code>publisher-sports</code> on <code>sports</code>: only Receivers subscribed to <code>sports</code> get its messages (topic isolation).</li>
+      <li>Add a second publisher with a different id on <code>news</code>: the broker rejects the registration (one publisher per topic).</li>
+      <li>Click <em>Send 10</em>: a Receiver started with <code>-w 1</code> prints #1…#10 in order. (With several workers, the Receiver may print them out of order.)</li>
+      <li>Click <em>Drop connection</em>, then quickly send a message: it waits as <em>queued</em>, and is sent once the publisher reconnects and registers again.</li>
+      <li>Stop a Receiver, send a few messages, then start it again: it prints the topic's whole history (marked <em>(history)</em>), including what it missed, then live messages.</li>
+      <li>Send a few messages on <code>games</code> before any Receiver listens to it, then start a new Receiver on <code>games</code>: the earlier messages appear right away.</li>
+      <li>Pick an invalid frame and click <em>Send invalid</em>: the broker rejects it with a reason and logs it to its Dead Letter Queue.</li>
+    </ol>
+  </details>
+
+  <div class="grid" id="panels"></div>
+  <div class="empty" id="empty">No publishers yet. Add one above.</div>
+</main>
+
+<div class="toast" id="toast" role="alert"></div>
+
+<template id="panel-template">
+  <section class="panel">
+    <div class="panel-head">
+      <span class="pid"></span>
+      <span class="topic"></span>
+      <span class="badge"></span>
+      <button class="icon remove" type="button" title="Remove publisher" aria-label="Remove publisher">×</button>
+    </div>
+    <div class="detail"></div>
+    <form class="composer">
+      <input name="payload" placeholder="Message text" autocomplete="off" required>
+      <button class="primary" type="submit">Send</button>
+    </form>
+    <div class="actions">
+      <button type="button" class="burst" title="Publish 10 numbered messages at once">Send 10</button>
+      <button type="button" class="drop" title="Cancel the gRPC stream as if the network failed">Drop connection</button>
+      <span class="invalid-group">
+        <select class="invalid-kind" aria-label="Invalid frame to send">
+          <option value="missing-id">Missing message_id</option>
+          <option value="wrong-topic">Wrong topic</option>
+          <option value="empty-payload">Empty payload</option>
+          <option value="empty-frame">Empty frame</option>
+        </select>
+        <button type="button" class="invalid">Send invalid</button>
+      </span>
+    </div>
+    <div class="counts"></div>
+    <ol class="log"></ol>
+  </section>
+</template>
+
+<script>
+  const STATE_LABELS = {
+    connecting: "Connecting",
+    registering: "Registering",
+    registered: "Registered",
+    rejected: "Rejected",
+    disconnected: "Disconnected",
+    stopped: "Stopped"
+  };
+  const panelsEl = document.getElementById("panels");
+  const emptyEl = document.getElementById("empty");
+  const panels = new Map(); // key -> { el, data, retryDeadline }
+
+  function showError(text) {
+    const toast = document.getElementById("toast");
+    toast.textContent = text;
+    toast.classList.add("show");
+    clearTimeout(showError.timer);
+    showError.timer = setTimeout(() => toast.classList.remove("show"), 4000);
+  }
+
+  async function api(method, path, body) {
+    try {
+      const response = await fetch(path, {
+        method,
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        showError(data.error || `Request failed (${response.status})`);
+        return false;
+      }
+      return true;
+    } catch {
+      showError("UI server is not reachable");
+      return false;
+    }
+  }
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function createPanel(key) {
+    const root = document.getElementById("panel-template").content.firstElementChild.cloneNode(true);
+    const base = `/api/publishers/${encodeURIComponent(key)}`;
+    root.querySelector(".remove").addEventListener("click", () => api("DELETE", base));
+    root.querySelector(".composer").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = event.target.elements.payload;
+      if (await api("POST", `${base}/messages`, { payload: input.value })) input.value = "";
+      input.focus();
+    });
+    root.querySelector(".burst").addEventListener("click", () => {
+      const input = root.querySelector(".composer input");
+      api("POST", `${base}/messages`, { payload: input.value.trim() || "burst message", count: 10 });
+    });
+    root.querySelector(".drop").addEventListener("click", () => api("POST", `${base}/drop`));
+    root.querySelector(".invalid").addEventListener("click", () =>
+      api("POST", `${base}/invalid`, { kind: root.querySelector(".invalid-kind").value }));
+    panelsEl.appendChild(root);
+    return root;
+  }
+
+  function statusDetail(entry) {
+    const { status } = entry.data;
+    if (status.state === "disconnected" && entry.retryDeadline) {
+      const seconds = Math.max(0, Math.ceil((entry.retryDeadline - Date.now()) / 1000));
+      return `${status.detail || "Connection closed"}, reconnecting in ${seconds}s`;
+    }
+    return status.detail || "";
+  }
+
+  function renderPanel(data) {
+    let entry = panels.get(data.key);
+    if (!entry) {
+      entry = { el: createPanel(data.key) };
+      panels.set(data.key, entry);
+    }
+    const previous = entry.data;
+    entry.data = data;
+    if (data.status.state === "disconnected" && data.status.retryInMs &&
+        (!previous || previous.status.state !== "disconnected" || previous.status.retryInMs !== data.status.retryInMs)) {
+      entry.retryDeadline = Date.now() + data.status.retryInMs;
+    }
+
+    const root = entry.el;
+    root.querySelector(".pid").textContent = data.publisherId;
+    root.querySelector(".pid").title = data.publisherId;
+    root.querySelector(".topic").textContent = data.topic;
+    const badge = root.querySelector(".badge");
+    badge.textContent = STATE_LABELS[data.status.state] || data.status.state;
+    badge.className = `badge s-${data.status.state}`;
+    root.querySelector(".detail").textContent = statusDetail(entry);
+
+    const counts = { queued: 0, sent: 0, acked: 0, rejected: 0 };
+    for (const message of data.messages) counts[message.status]++;
+    const countsEl = root.querySelector(".counts");
+    countsEl.replaceChildren(...Object.entries(counts).map(([name, value]) => {
+      const span = el("span", "", `${name} `);
+      span.appendChild(el("b", "", String(value)));
+      return span;
+    }));
+
+    const log = root.querySelector(".log");
+    if (data.messages.length === 0) {
+      log.replaceChildren(el("li", "empty-log", "No messages yet"));
+    } else {
+      log.replaceChildren(...[...data.messages].reverse().map((message) => {
+        const item = el("li", message.raw ? "raw" : "");
+        item.appendChild(el("span", "time", new Date(message.timestamp).toLocaleTimeString()));
+        item.appendChild(el("span", "payload", message.payload));
+        item.appendChild(el("span", `pill m-${message.status}`, message.status));
+        if (!message.raw) item.appendChild(el("span", "mid", message.sequence ? `#${message.sequence} · ${message.messageId}` : message.messageId));
+        if (message.reason) item.appendChild(el("span", "reason", message.reason));
+        return item;
+      }));
+    }
+    updateEmpty();
+  }
+
+  function removePanel(key) {
+    const entry = panels.get(key);
+    if (!entry) return;
+    entry.el.remove();
+    panels.delete(key);
+    updateEmpty();
+  }
+
+  function updateEmpty() {
+    emptyEl.hidden = panels.size > 0;
+  }
+
+  // Keeps the "reconnecting in Ns" countdown ticking between server updates.
+  setInterval(() => {
+    for (const entry of panels.values()) {
+      if (entry.data.status.state === "disconnected") entry.el.querySelector(".detail").textContent = statusDetail(entry);
+    }
+  }, 500);
+
+  document.getElementById("add-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.target;
+    const ok = await api("POST", "/api/publishers", {
+      publisherId: form.elements.publisherId.value,
+      topic: form.elements.topic.value
+    });
+    if (ok) form.reset();
+    form.elements.publisherId.focus();
+  });
+
+  const live = document.getElementById("live");
+  const liveText = document.getElementById("live-text");
+  const events = new EventSource("/events");
+  events.addEventListener("open", () => {
+    live.className = "live on";
+    liveText.textContent = "Live";
+  });
+  events.addEventListener("error", () => {
+    live.className = "live off";
+    liveText.textContent = "UI server unreachable, retrying…";
+  });
+  events.addEventListener("snapshot", (event) => {
+    const snapshot = JSON.parse(event.data);
+    document.getElementById("broker").textContent = snapshot.broker;
+    const keys = new Set(snapshot.panels.map((panel) => panel.key));
+    for (const key of [...panels.keys()]) if (!keys.has(key)) removePanel(key);
+    snapshot.panels.forEach(renderPanel);
+    updateEmpty();
+  });
+  events.addEventListener("panel", (event) => renderPanel(JSON.parse(event.data)));
+  events.addEventListener("removed", (event) => removePanel(JSON.parse(event.data).key));
+</script>
+</body>
+</html>

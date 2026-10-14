@@ -1,0 +1,113 @@
+// Contract shared by the Broker (Java), the Receiver (C#) and the Publisher (TypeScript).
+// Each module generates its own client or server code from this file.
+syntax = "proto3";
+
+package pad.pubsub;
+
+option java_package = "com.pad.broker.grpc";
+option java_multiple_files = true;
+option csharp_namespace = "MessageBroker.Receiver.Grpc";
+
+service Broker {
+  // Publisher stream. The first frame must be a Register; after the broker answers Registered,
+  // every Publish frame gets exactly one reply (PublishAck or PublishRejected), in order.
+  // A rejected registration ends the call with ALREADY_EXISTS or INVALID_ARGUMENT.
+  rpc Publish(stream PublisherFrame) returns (stream PublisherReply);
+
+  // Subscriber stream. The first frame must be a Subscribe. The broker answers Subscribed,
+  // then sends every stored message of the subscribed topics (replayed = true), then live
+  // messages as they are published. The subscriber sends an Ack for each message it handled.
+  rpc Subscribe(stream SubscriberFrame) returns (stream SubscriberEvent);
+}
+
+// ---------- Publisher ----------
+
+message PublisherFrame {
+  oneof kind {
+    Register register = 1;
+    PublishMessage message = 2;
+  }
+}
+
+message Register {
+  string publisher_id = 1;
+  string topic = 2;
+}
+
+message PublishMessage {
+  // Chosen by the publisher (a UUID). Resending the same id after a reconnect is safe:
+  // the broker stores each id only once per topic.
+  string message_id = 1;
+  string topic = 2;
+  string payload = 3;
+  // ISO-8601, set by the publisher.
+  string timestamp = 4;
+}
+
+message PublisherReply {
+  oneof kind {
+    Registered registered = 1;
+    PublishAck ack = 2;
+    PublishRejected rejected = 3;
+  }
+}
+
+message Registered {
+  string detail = 1;
+}
+
+message PublishAck {
+  string message_id = 1;
+  // Position of the message in the topic's history (1, 2, 3, ...).
+  int64 sequence = 2;
+  // True when the broker already had this message_id and did not store it again.
+  bool duplicate = 3;
+}
+
+message PublishRejected {
+  string message_id = 1;
+  string reason = 2;
+}
+
+// ---------- Subscriber ----------
+
+message SubscriberFrame {
+  oneof kind {
+    Subscribe subscribe = 1;
+    Ack ack = 2;
+  }
+}
+
+message Subscribe {
+  // Stable id. Only one stream per id is active: a new one replaces the old one.
+  string subscriber_id = 1;
+  repeated string topics = 2;
+}
+
+message Ack {
+  string message_id = 1;
+}
+
+message SubscriberEvent {
+  oneof kind {
+    Subscribed subscribed = 1;
+    Delivery message = 2;
+  }
+}
+
+message Subscribed {
+  repeated string topics = 1;
+  // How many stored messages follow before the live ones.
+  int32 history_count = 2;
+}
+
+message Delivery {
+  string message_id = 1;
+  string publisher_id = 2;
+  string topic = 3;
+  string payload = 4;
+  string timestamp = 5;
+  int64 sequence = 6;
+  // True for messages sent from the topic's history when the subscriber connected.
+  bool replayed = 7;
+}

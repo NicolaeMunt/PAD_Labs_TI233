@@ -1,0 +1,56 @@
+# Runs the gRPC version of the system in containers. `docker compose up` starts the broker and the
+# publisher web UI (http://localhost:3000). Terminal publishers and receivers are interactive, so
+# start each one with `docker compose run` (see README.md).
+#
+# Every image is built from this folder so it can read the shared proto/pubsub.proto.
+name: pad-lab2
+services:
+  broker:
+    build:
+      context: .
+      dockerfile: Broker/Dockerfile
+    environment:
+      HISTORY_LIMIT: "1000"
+    ports:
+      - "5000:5000"
+    networks:
+      - pad-net
+
+  publisher-ui:
+    build:
+      context: .
+      dockerfile: Publisher/Dockerfile
+    command: ["--ui", "broker", "5000", "3000"]
+    depends_on:
+      - broker
+    ports:
+      - "3000:3000"
+    networks:
+      - pad-net
+
+  publisher:
+    build:
+      context: .
+      dockerfile: Publisher/Dockerfile
+    profiles: ["clients"]
+    depends_on:
+      - broker
+    stdin_open: true
+    tty: true
+    networks:
+      - pad-net
+
+  receiver:
+    build:
+      context: .
+      dockerfile: Receiver/Dockerfile
+    profiles: ["clients"]
+    depends_on:
+      - broker
+    tty: true
+    networks:
+      - pad-net
+
+networks:
+  pad-net:
+    driver: bridge

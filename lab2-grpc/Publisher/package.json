@@ -1,0 +1,22 @@
+{
+  "name": "pad-publisher-grpc",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Node.js/TypeScript publisher for the PAD gRPC publish-subscribe broker",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "start:ui": "node dist/index.js --ui",
+    "dev": "tsx src/index.ts",
+    "ui": "tsx src/index.ts --ui"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.12.2",
+    "@grpc/proto-loader": "^0.7.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
