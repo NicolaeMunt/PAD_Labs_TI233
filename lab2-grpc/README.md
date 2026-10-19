@@ -33,7 +33,48 @@ The broker listens on port **5000** (gRPC, plaintext HTTP/2).
   or the second broker argument). History is in memory only: restarting the broker clears it.
 - Each message has a per-topic sequence number (`#1`, `#2`, …), shown by the receiver and the UI.
 
-## Quick start (Docker)
+## Quick start: one command
+
+With Docker Desktop installed, one script builds the images, starts the broker and the publisher web
+UI (opened in your browser), and opens a window with the broker's log. The script's window then
+becomes a prompt where **you create receivers while everything runs**. Each receiver opens in its
+own terminal window, in its own container.
+
+**Windows:** double-click `start.cmd`, or run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File start.ps1                  # build, then start
+powershell -ExecutionPolicy Bypass -File start.ps1 -SkipBuild       # start without rebuilding
+powershell -ExecutionPolicy Bypass -File start.ps1 -DemoReceivers   # also start 4 demo receivers
+powershell -ExecutionPolicy Bypass -File start.ps1 -Stop            # stop everything
+```
+
+**macOS / Linux / Git Bash:**
+
+```bash
+sh start.sh                     # build, then start
+sh start.sh --skip-build        # start without rebuilding
+sh start.sh --demo-receivers    # also start 4 demo receivers
+sh start.sh --no-windows        # everything in this terminal (e.g. over SSH)
+```
+
+Type these at the script's `>` prompt:
+
+| Command | What it does |
+|---|---|
+| `add <name> <topics>` | Creates a receiver in a new window, e.g. `add carol games` or `add dave news,sports,games`. It first prints the topics' stored history. |
+| `stop <name>` | Stops that receiver. `add` with the same name brings it back, with the history again, including what it missed. |
+| `list` | Shows the running receivers and their topics |
+| `quit` | Stops everything (Ctrl+C does too in `start.sh`) |
+
+A receiver can also be stopped with Ctrl+C in its own window, and started again there: type
+`Start-Receiver` and press Enter on Windows, or just press Enter on macOS and Linux.
+
+`-DemoReceivers` / `--demo-receivers` starts `alice` (news, sports), `bob` (news), `carol` (games)
+and `dave` (news, sports, games). Lab 1 and Lab 2 use the same ports (5000 and 3000), so stop one
+before starting the other.
+
+## Step by step (Docker)
 
 You only need Docker Desktop. Run everything from this `lab2-grpc/` folder.
 
