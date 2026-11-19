@@ -43,7 +43,10 @@ public class GatewayStateController {
         List<Map<String, Object>> backends = registry.all().stream().map(b -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("name", b.name());
+            m.put("warehouse", b.warehouse());
             m.put("url", b.baseUri().toString());
+            m.put("state", b.state().name());
+            m.put("managed", b.isManaged());
             m.put("healthy", b.isHealthy());
             m.put("lastError", b.lastError());
             m.put("activeRequests", b.active());
@@ -61,6 +64,8 @@ public class GatewayStateController {
 
         Map<String, Object> state = new LinkedHashMap<>();
         state.put("strategy", balancer.name());
+        state.put("defaultWarehouse", props.defaultWarehouse());
+        state.put("warehouses", registry.warehouses());
         state.put("backends", backends);
         state.put("connectionPool", pool(client.totalPoolStats()));
         state.put("cache", cacheInfo);

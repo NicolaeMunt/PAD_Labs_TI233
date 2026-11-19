@@ -18,6 +18,7 @@ import org.apache.hc.core5.http.ConnectionRequestTimeoutException;
 
 import md.utm.gateway.backend.Backend;
 import md.utm.gateway.backend.BackendRegistry;
+import md.utm.gateway.backend.Warehouses;
 import md.utm.gateway.balancer.LoadBalancer;
 import md.utm.gateway.cache.ResponseCache;
 import md.utm.gateway.config.GatewayProperties;
@@ -34,6 +35,10 @@ import md.utm.gateway.config.GatewayProperties;
  *   <li><b>Invalidation</b> – a write under a cached path makes its collection's cache stale.</li>
  * </ol>
  *
+ * Every step happens inside one <b>warehouse</b>, picked by the X-Warehouse header (or the
+ * default one). Each warehouse has its own database, so a request is never failed over to
+ * an instance of another warehouse: that instance would answer from different data.
+ *
  * Stateless apart from thread-safe collaborators, so one instance serves all request threads.
  */
 public class ProxyService {
@@ -41,25 +46,27 @@ public class ProxyService {
     /** What the gateway did with the request; sent to the client as X-Cache. */
     public enum CacheStatus { HIT, MISS, COALESCED, BYPASS }
 
-    public record Result(ProxyResponse response, CacheStatus cacheStatus) { }
+    public record Result(ProxyResponse response, CacheStatus cacheStatus, String warehouse) { }
 
     private final BackendRegistry registry;
     private final LoadBalancer balancer;
     private final BackendClient client;
     private final ResponseCache cache;
     private final GatewayProperties.Cache cacheCfg;
+    private final String defaultWarehouse;
     private final GatewayStats stats = new GatewayStats();
 
     /** cache key → the backend call that is already loading it */
     private final ConcurrentHashMap<String, CompletableFuture<ProxyResponse>> inFlight = new ConcurrentHashMap<>();
 
     public ProxyService(BackendRegistry registry, LoadBalancer balancer, BackendClient client,
-                        ResponseCache cache, GatewayProperties.Cache cacheCfg) {
+                        ResponseCache cache, GatewayProperties.Cache cacheCfg, String defaultWarehouse) {
         this.registry = registry;
         this.balancer = balancer;
         this.client = client;
         this.cache = cache;
         this.cacheCfg = cacheCfg;
+        this.defaultWarehouse = Warehouses.requireValid(defaultWarehouse);
     }
 
     public GatewayStats stats() {
@@ -68,30 +75,44 @@ public class ProxyService {
 
     public Result handle(ProxyRequest req) {
         stats.requests.increment();
+        String warehouse = warehouseOf(req);
         String collection = cachedCollection(req.path());
 
         if (collection != null && req.method().equals("GET") && req.header("Authorization") == null) {
-            Optional<String> key = cache.key(collection, normalizeAccept(req.header("Accept")), req.pathAndQuery());
-            if (key.isPresent()) return cachedGet(key.get(), req);
+            Optional<String> key = cache.key(warehouse, collection,
+                    normalizeAccept(req.header("Accept")), req.pathAndQuery());
+            if (key.isPresent()) return cachedGet(key.get(), req, warehouse);
         }
 
         try {
-            return new Result(forward(req), CacheStatus.BYPASS);
+            return new Result(forward(req, warehouse), CacheStatus.BYPASS, warehouse);
         } finally {
             // Any write under a cached path invalidates, even a failed or timed-out one:
             // the API may have applied it before the answer got lost.
             if (collection != null && !req.isRead()) {
-                cache.invalidate(collection);
+                cache.invalidate(warehouse, collection);
                 stats.invalidations.increment();
             }
         }
     }
 
-    private Result cachedGet(String key, ProxyRequest req) {
+    /** The X-Warehouse header, or the default warehouse when there is none. */
+    String warehouseOf(ProxyRequest req) {
+        String raw = req.header(Warehouses.HEADER);
+        if (raw == null || raw.isBlank()) return defaultWarehouse;
+        String warehouse = Warehouses.normalize(raw);
+        if (warehouse == null) {
+            stats.errors.increment();
+            throw new GatewayException(400, "Invalid " + Warehouses.HEADER + " header '" + raw + "'");
+        }
+        return warehouse;
+    }
+
+    private Result cachedGet(String key, ProxyRequest req, String warehouse) {
         Optional<ProxyResponse> hit = cache.get(key);
         if (hit.isPresent()) {
             stats.cacheHits.increment();
-            return new Result(hit.get(), CacheStatus.HIT);
+            return new Result(hit.get(), CacheStatus.HIT, warehouse);
         }
 
         // Only the first thread to miss calls a backend; the others wait for its answer.
@@ -99,17 +120,17 @@ public class ProxyService {
         CompletableFuture<ProxyResponse> leader = inFlight.putIfAbsent(key, mine);
         if (leader != null) {
             stats.coalesced.increment();
-            return new Result(await(leader), CacheStatus.COALESCED);
+            return new Result(await(leader), CacheStatus.COALESCED, warehouse);
         }
 
         try {
-            ProxyResponse resp = forward(req);
+            ProxyResponse resp = forward(req, warehouse);
             if (resp.status() == 200 && resp.body().length <= cacheCfg.maxBodyBytes()) {
                 cache.put(key, resp);   // before removing from inFlight, so late threads find it cached
             }
             stats.cacheMisses.increment();
             mine.complete(resp);
-            return new Result(resp, CacheStatus.MISS);
+            return new Result(resp, CacheStatus.MISS, warehouse);
         } catch (Throwable t) {
             mine.completeExceptionally(t);
             throw t;
@@ -127,18 +148,31 @@ public class ProxyService {
         }
     }
 
-    /** Sends the request to a healthy backend, failing over to the others when that is safe. */
-    ProxyResponse forward(ProxyRequest req) {
-        List<Backend> candidates = new ArrayList<>(registry.healthy());
+    /**
+     * Sends the request to a healthy backend of the warehouse, failing over to the warehouse's
+     * other backends when that is safe.
+     */
+    ProxyResponse forward(ProxyRequest req, String warehouse) {
+        List<Backend> members = registry.inWarehouse(warehouse);
+        if (members.isEmpty()) {
+            stats.errors.increment();
+            throw new GatewayException(404, "Unknown warehouse '" + warehouse + "' (known: "
+                    + String.join(", ", registry.warehouses()) + ")");
+        }
+        List<Backend> candidates = new ArrayList<>(members.stream().filter(Backend::isHealthy).toList());
         if (candidates.isEmpty()) {
             stats.errors.increment();
-            throw new GatewayException(503, "No healthy API instance is available");
+            throw new GatewayException(503, "No healthy API instance in warehouse '" + warehouse + "'");
         }
 
         IOException lastError = null;
         while (!candidates.isEmpty()) {
             Backend backend = balancer.choose(candidates);
-            backend.requestStarted();
+            if (!backend.tryAcquire()) {
+                // removed by a scale-down after the list was read: it is shutting down
+                candidates.remove(backend);
+                continue;
+            }
             try {
                 ProxyResponse resp = client.send(backend, req);
                 backend.requestAnswered();
@@ -161,8 +195,11 @@ public class ProxyService {
             }
         }
         stats.errors.increment();
+        if (lastError == null) {
+            throw new GatewayException(503, "No healthy API instance in warehouse '" + warehouse + "'");
+        }
         throw new GatewayException(lastError instanceof SocketTimeoutException ? 504 : 502,
-                "No API instance answered (last error: " + lastError + ")");
+                "No API instance of warehouse '" + warehouse + "' answered (last error: " + lastError + ")");
     }
 
     /** True when the failure happened before any byte of the request was sent. */

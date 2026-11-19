@@ -14,9 +14,9 @@ public class InMemoryResponseCache implements ResponseCache {
     private final ConcurrentHashMap<String, ProxyResponse> entries = new ConcurrentHashMap<>();
 
     @Override
-    public Optional<String> key(String collection, String accept, String pathAndQuery) {
-        long gen = generations.computeIfAbsent(collection, c -> new AtomicLong()).get();
-        return Optional.of(collection + ":" + gen + ":" + accept + ":" + pathAndQuery);
+    public Optional<String> key(String warehouse, String collection, String accept, String pathAndQuery) {
+        long gen = generations.computeIfAbsent(warehouse + ":" + collection, c -> new AtomicLong()).get();
+        return Optional.of(warehouse + ":" + collection + ":" + gen + ":" + accept + ":" + pathAndQuery);
     }
 
     @Override
@@ -30,8 +30,8 @@ public class InMemoryResponseCache implements ResponseCache {
     }
 
     @Override
-    public void invalidate(String collection) {
-        generations.computeIfAbsent(collection, c -> new AtomicLong()).incrementAndGet();
+    public void invalidate(String warehouse, String collection) {
+        generations.computeIfAbsent(warehouse + ":" + collection, c -> new AtomicLong()).incrementAndGet();
     }
 
     @Override

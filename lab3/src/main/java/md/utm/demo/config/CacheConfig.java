@@ -18,11 +18,15 @@ public class CacheConfig {
 
     private final Duration gamesTtl;
     private final Duration defaultTtl;
+    /** All instances share one Redis, but each warehouse has its own database, so its own keys. */
+    private final String keyPrefix;
 
     public CacheConfig(@Value("${app.cache.games-ttl:10m}") Duration gamesTtl,
-                       @Value("${app.cache.default-ttl:5m}") Duration defaultTtl) {
+                       @Value("${app.cache.default-ttl:5m}") Duration defaultTtl,
+                       @Value("${app.warehouse:unknown}") String warehouse) {
         this.gamesTtl = gamesTtl;
         this.defaultTtl = defaultTtl;
+        this.keyPrefix = "gamevault:" + warehouse + ":v1:";
     }
 
     @Bean
@@ -35,7 +39,7 @@ public class CacheConfig {
     private RedisCacheConfiguration defaults(Duration ttl) {
         return RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(ttl)
-                .prefixCacheNameWith("gamevault:v1:");
+                .prefixCacheNameWith(keyPrefix);
     }
 
     private RedisCacheConfiguration typed(Class<?> type, Duration ttl) {

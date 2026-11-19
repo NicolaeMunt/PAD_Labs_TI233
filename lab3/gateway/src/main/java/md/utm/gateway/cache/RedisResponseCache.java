@@ -18,8 +18,8 @@ import md.utm.gateway.proxy.ProxyResponse;
  * Response cache in Redis.
  *
  * Keys:
- *   gateway:gen:{collection}                              → generation counter (INCR on write)
- *   gateway:resp:{collection}:{gen}:{accept}:{path?query} → cached response, with a TTL
+ *   gateway:gen:{warehouse}:{collection}                              → generation counter (INCR on write)
+ *   gateway:resp:{warehouse}:{collection}:{gen}:{accept}:{path?query} → cached response, with a TTL
  *
  * The Accept header is part of the key, so the JSON and the XML version of the same
  * resource are cached separately.
@@ -43,11 +43,11 @@ public class RedisResponseCache implements ResponseCache {
     }
 
     @Override
-    public Optional<String> key(String collection, String accept, String pathAndQuery) {
+    public Optional<String> key(String warehouse, String collection, String accept, String pathAndQuery) {
         if (!isAvailable()) return Optional.empty();
         try {
-            String gen = redis.opsForValue().get(genKey(collection));
-            return Optional.of("gateway:resp:" + collection + ":" + (gen == null ? "0" : gen)
+            String gen = redis.opsForValue().get(genKey(warehouse, collection));
+            return Optional.of("gateway:resp:" + warehouse + ":" + collection + ":" + (gen == null ? "0" : gen)
                     + ":" + accept + ":" + pathAndQuery);
         } catch (RuntimeException e) {
             failed("key", e);
@@ -77,10 +77,10 @@ public class RedisResponseCache implements ResponseCache {
     }
 
     @Override
-    public void invalidate(String collection) {
+    public void invalidate(String warehouse, String collection) {
         try {
             // INCR is atomic in Redis, so concurrent writes on several gateways never lose a bump
-            redis.opsForValue().increment(genKey(collection));
+            redis.opsForValue().increment(genKey(warehouse, collection));
         } catch (RuntimeException e) {
             // the stale entries will still expire with their TTL
             failed("invalidate", e);
@@ -99,8 +99,8 @@ public class RedisResponseCache implements ResponseCache {
         skipUntil = System.currentTimeMillis() + RETRY_AFTER_MS;
     }
 
-    private static String genKey(String collection) {
-        return "gateway:gen:" + collection;
+    private static String genKey(String warehouse, String collection) {
+        return "gateway:gen:" + warehouse + ":" + collection;
     }
 
     // ---- value format: status \n Content-Type \n X-Instance-Id \n base64(body) ----

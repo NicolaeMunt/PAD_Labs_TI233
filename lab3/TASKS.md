@@ -71,7 +71,16 @@ Requirements 10 and 11 talk about a gateway, which does not exist yet.
   - Integration: `POST` retry after a lost response does not create two games.
   - Manual: `docker compose stop api-1`, watch `/gateway/state`, start it again and see it recover.
 
-### Task 5 – MongoDB replication (req. 12)  ·  Hard
+### Task 5 – MongoDB replication (req. 12)  ·  Hard  ·  ✅ DONE
+Implemented, extended to **one replica set per warehouse**: each warehouse has its own replica set
+`rs-<warehouse>` with as many database copies as API instances, but at least 3 (`w=majority`;
+API instance i reads from copy i). The client sets the number of API instances at runtime
+(`PUT /gateway/warehouses/{name} {"replicas": n}`, also from the UI); the gateway starts and stops
+the API containers and the Mongo nodes itself, through the Docker socket, and reconfigures the
+replica set. The first version (one shared 3-node set `rs0` in docker-compose.yml) is replaced.
+See [README.md](README.md) and [gateway/README.md](gateway/README.md).
+The plan below is the original one.
+
 - Replace the single `mongo` service with a 3-node replica set (`mongo-1`, `mongo-2`, `mongo-3`) in Docker Compose. One node is primary, the others are secondaries. Mongo elects a new primary automatically when the primary dies.
 - An init step (one-shot container) runs `rs.initiate(...)` with the three members.
 - Change the connection string to `mongodb://mongo-1:27017,mongo-2:27017,mongo-3:27017/gamevault?replicaSet=rs0` so the driver finds the new primary after a failover.

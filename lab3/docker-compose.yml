@@ -1,20 +1,31 @@
-# Clients → gateway (:8080) → api-1 / api-2 / api-3 → one MongoDB + one Redis.
-# The API instances have no published ports: the gateway is the only way in.
-
-x-api: &api
-  build: .
-  depends_on:
-    mongo:
-      condition: service_healthy
-    redis:
-      condition: service_healthy
-
-x-api-env: &api-env
-  SPRING_MONGODB_URI: mongodb://mongo:27017/gamevault
-  SPRING_DATA_REDIS_HOST: redis
-  SPRING_DATA_REDIS_PORT: 6379
+# Clients → gateway (:8080) → the API instances of a warehouse → that warehouse's own MongoDB replica set.
+#
+# Warehouses: every warehouse has
+#   - N API instances      api-<warehouse>-1 .. api-<warehouse>-N   (N = 1..5, chosen by the client)
+#   - its own replica set  rs-<warehouse> with max(3, N) Mongo nodes mongo-<warehouse>-1 ..,
+#                          one data volume each (gamevault-mongo-<warehouse>-<i>), database gamevault_<warehouse>
+# API instance i reads from Mongo node i; all writes go to the replica set's primary (w=majority).
+#
+# Compose only starts the gateway, Redis and the web UI. The gateway creates all API containers and
+# Mongo nodes itself, through the Docker socket: on startup warehouse-1/2/3 (1 API + 3 Mongo nodes each),
+# later whatever the client asks for (PUT /gateway/warehouses/{name} {"replicas": n}).
+# Each API instance is also published on a free host port in 8081..8099 for direct calls.
+#
+# Stop: compose does not manage the containers and volumes the gateway created, so remove them first:
+#   docker rm -f $(docker ps -aq --filter label=gamevault.managed=true)
+#   docker volume rm $(docker volume ls -q --filter label=gamevault.managed=true)   # deletes all warehouse data
+#   docker compose down
+# The data of the old shared replica set rs0 (volumes gamevault_mongo-1/2/3-data) is not migrated.
+name: gamevault
 
 services:
+  # build-only: builds the API image the gateway starts its containers from, then exits
+  api-image:
+    build: .
+    image: gamevault-api:latest
+    entrypoint: ["true"]
+    restart: "no"
+
   gateway:
     build:
       context: .
@@ -22,37 +33,32 @@ services:
     ports:
       - "8080:8080"
     environment:
-      GATEWAY_BACKENDS: http://api-1:8080,http://api-2:8080,http://api-3:8080
+      GATEWAY_DEFAULTWAREHOUSE: warehouse-1
+      GATEWAY_INITIALWAREHOUSES: warehouse-1,warehouse-2,warehouse-3
       GATEWAY_STRATEGY: round-robin          # or least-connections
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
+      # horizontal scaling: the gateway starts/stops API containers and Mongo nodes through the Docker socket
+      GATEWAY_PROVISIONER_ENABLED: "true"
+      GATEWAY_PROVISIONER_APIIMAGE: gamevault-api:latest
+      GATEWAY_PROVISIONER_MONGOIMAGE: mongo:8
+      GATEWAY_PROVISIONER_NETWORK: gamevault-net
+      GATEWAY_PROVISIONER_REDISHOST: redis
+      GATEWAY_PROVISIONER_REDISPORT: 6379
+      GATEWAY_PROVISIONER_HOSTPORTFROM: 8081
+      GATEWAY_PROVISIONER_HOSTPORTTO: 8099
+      GATEWAY_PROVISIONER_MONGOCACHEGB: "0.25"
+      GATEWAY_PROVISIONER_MINDBCOPIES: 3
+      GATEWAY_PROVISIONER_MAXREPLICAS: 5
+      GATEWAY_PROVISIONER_MAXWAREHOUSES: 5
+    volumes:
+      # lets the gateway start and stop containers (it gets full control of Docker: fine for a lab)
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
+      api-image:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
-      api-1:
-        condition: service_started
-      api-2:
-        condition: service_started
-      api-3:
-        condition: service_started
-
-  api-1:
-    <<: *api
-    environment:
-      <<: *api-env
-      APP_INSTANCE_ID: api-1
-
-  api-2:
-    <<: *api
-    environment:
-      <<: *api-env
-      APP_INSTANCE_ID: api-2
-
-  api-3:
-    <<: *api
-    environment:
-      <<: *api-env
-      APP_INSTANCE_ID: api-3
 
   web:
     build: ./frontend
@@ -65,18 +71,6 @@ services:
     depends_on:
       - gateway
 
-  mongo:
-    image: mongo:8
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   redis:
     image: redis:7-alpine
     ports:
@@ -87,5 +81,7 @@ services:
       timeout: 3s
       retries: 10
 
-volumes:
-  mongo-data:
+# a fixed name, so the gateway can attach the containers it starts to it
+networks:
+  default:
+    name: gamevault-net

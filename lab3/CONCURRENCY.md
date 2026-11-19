@@ -2,7 +2,7 @@
 
 What the code does today to stay correct when many requests run at the same time, and what is still missing. The gateway sections are planned and will be updated when the code exists.
 
-Context: Spring MVC on Tomcat uses **one thread per request**, and every controller, service and filter is a **singleton shared by all those threads**. Several API instances also share one MongoDB and one Redis. So there are two levels of concurrency: threads inside one instance, and instances against shared data.
+Context: Spring MVC on Tomcat uses **one thread per request**, and every controller, service and filter is a **singleton shared by all those threads**. The API instances of a warehouse share its MongoDB replica set, and all instances share one Redis. So there are two levels of concurrency: threads inside one instance, and instances against shared data.
 
 ## 1. Used today
 
@@ -49,9 +49,32 @@ Every client request runs on its own virtual thread; all gateway components are 
 | `ProxyService` coalescing | `ConcurrentHashMap.putIfAbsent(key, CompletableFuture)` | Only the first thread that misses a key calls the API; the others `join()` its future. The leader stores the answer in Redis *before* removing the future, so late threads find it cached. **Tested:** 20 concurrent misses → 1 backend call. |
 | `RedisResponseCache` | Generation counter with Redis `INCR`; `SET key value EX ttl` | Atomic in Redis, also across several gateways. The generation is read before the backend call, so a GET racing with a write stores its answer under the old generation and it is never served. |
 | `GatewayStats` | `LongAdder` | Cheap increments under heavy contention. |
-| `HealthChecker` | One scheduled thread; writes only `volatile` / atomic fields | Request threads read the health flags without locks. |
+| `HealthChecker` | One scheduled thread starts a round; each backend is probed on its own virtual thread; failure counts in a `ConcurrentHashMap` (`merge` is atomic) | A hanging instance does not delay the other checks; health flags are `volatile`, so request threads read them without locks. |
 
 **Tested:** 300 parallel requests → exactly 100/100/100 per instance, `active` back to 0 everywhere.
+
+### 1.7 Warehouses and horizontal scaling (gateway)
+Instances are added and removed **while requests are running**, so the list of backends is now shared mutable state.
+
+| Where | Mechanism | Why |
+|-------|-----------|-----|
+| `BackendRegistry` | `CopyOnWriteArrayList<Backend>`; `register`/`remove` are `synchronized` | Every request reads the list, only scaling writes it. Readers never lock and always get a complete snapshot; the duplicate-name check and the add happen atomically. |
+| `Backend.tryAcquire()` + `retire()` | `AtomicInteger active` and `volatile boolean retired`, in opposite order on both sides | A request that read the list just before a scale-down could still pick the removed instance. The request increments `active` and then reads `retired`; the scaler sets `retired` and then reads `active`. Both are sequentially consistent, so one side always sees the other: either the request backs off and picks another instance, or the scaler sees it in flight and waits. The container is stopped only after `active` reached 0. |
+| `WarehouseManager` desired state | `volatile int desired` per warehouse; PUT only writes it and schedules a reconcile | A client request never waits for containers. If two PUTs arrive close together, the last one wins: every reconcile reads the latest value. |
+| `WarehouseManager` reconcile | One single-thread executor (a virtual thread) per warehouse | All steps of one warehouse (start nodes, reconfigure its replica set, start / drain / stop APIs) run one at a time, so they never interleave; different warehouses scale in parallel. Request threads never wait for it. |
+| `WarehouseManager` create | A small lock around "check the warehouse limit, then add it" (`ConcurrentHashMap` of warehouses) | Two clients creating warehouses at once cannot both pass the limit check. |
+| Draining | Removed API instances are retired, then stopped once `active` is 0 (at most `drain-timeout`) | Same hand-off as `tryAcquire`/`retire` above: no request starts on an instance that is about to stop. |
+| Replica-set monitor | One scheduled thread polls every warehouse's replica set every few seconds; results are written to `volatile` fields | `GET /gateway/warehouses` reads the latest states without calling MongoDB and without locks. |
+| `ResponseCache` | The warehouse is part of every key and generation counter | Warehouses have different data; a write in one never invalidates, or is served to, another. |
+
+**Tested:** 400 requests answered while an instance is removed and another added, and the removed one got no request after its drain; the retire/drain hand-off under 8 threads × 20 000 attempts, repeated 20 times, with no request starting after the drain.
+
+### 1.8 MongoDB replica sets (DB sync), one per warehouse
+- **Where:** every warehouse `w` has its own replica set `rs-w` with max(3, N) nodes `mongo-w-1 ..`, where N is its number of API instances. The gateway creates and reconfigures them (`MongoReplicaSet`). Connection string of API instance i: all nodes of `rs-w`, `w=majority&retryWrites=true&readPreference=nearest&readPreferenceTags=node:i&readPreferenceTags=`.
+- **How:** the primary takes all writes and the secondaries copy them through the oplog. `w=majority` acknowledges a write only once a majority of the copies has it, so a failover never loses an acknowledged write. `retryWrites` makes the driver retry a write once when the primary changes mid-write. The unique index and `@Version` checks from 1.2 / 1.2b keep working, because all writes still go through the single primary of the warehouse.
+- **Reads from "your own" copy:** API instance i reads from node i, which can be a few milliseconds behind the primary. So a read through another instance right after a write can, rarely, miss that write; an update based on such a read fails with `409` (optimistic locking, 1.2b) instead of overwriting newer data.
+- **Reconfiguration:** members are added or removed one at a time (MongoDB allows one voting-member change per reconfig). A primary that is removed steps down first; the others elect a new one before it leaves.
+- **One database per warehouse** (`gamevault_<warehouse>`), in that warehouse's own replica set: warehouses share no data and no Mongo nodes.
 
 ## 2. Known limits
 
@@ -69,7 +92,8 @@ Fixed earlier gaps: lost updates on `PUT` (1.2b), cache stampede (1.3), create r
 | Request journal (Task 4) | `ConcurrentHashMap<requestId, entry>` with `compute` for state changes | Many threads record and update requests without locks; each state change is atomic per entry. |
 | Circuit breaker (Task 4) | Resilience4j (atomic state machine) or `AtomicReference<State>` + `AtomicInteger` failure counter | Safe state transitions CLOSED/OPEN/HALF_OPEN; only one trial request in HALF_OPEN. |
 | Timeouts and retries (Task 4) | `CompletableFuture` with timeout | A request never blocks a worker forever. |
-| DB sync (Task 5) | MongoDB replica set: primary takes writes, secondaries copy them via the oplog | Keeps the 3 databases consistent; write concern `majority` makes a write count only when most nodes have it, so a failover does not lose acknowledged writes. |
+
+DB sync (Task 5) is done: see 1.8.
 
 ## 4. How we will test it
 - Parallel `create` of the same game (many threads, one `CountDownLatch` start signal): exactly one 201, the rest 409.

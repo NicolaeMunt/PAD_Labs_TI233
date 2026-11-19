@@ -19,6 +19,8 @@
 
 	<properties>
 		<java.version>25</java.version>
+		<!-- override with -Dgw.build.dir=... to build in another folder (parallel builds) -->
+		<gw.build.dir>${project.basedir}/target</gw.build.dir>
 	</properties>
 
 	<dependencies>
@@ -39,6 +41,11 @@
 			<groupId>org.apache.httpcomponents.client5</groupId>
 			<artifactId>httpclient5</artifactId>
 		</dependency>
+		<!-- manages each warehouse's replica set (initiate, add/remove members, status) -->
+		<dependency>
+			<groupId>org.mongodb</groupId>
+			<artifactId>mongodb-driver-sync</artifactId>
+		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -48,6 +55,7 @@
 	</dependencies>
 
 	<build>
+		<directory>${gw.build.dir}</directory>
 		<plugins>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>

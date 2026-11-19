@@ -68,7 +68,33 @@ class GatewayApplicationTest {
     void stateEndpointListsBackends() throws Exception {
         HttpResponse<String> r = send("/gateway/state", "application/json");
         assertThat(r.statusCode()).isEqualTo(200);
-        assertThat(r.body()).contains("\"strategy\":\"least-connections\"").contains("\"backends\"");
+        assertThat(r.body()).contains("\"strategy\":\"least-connections\"").contains("\"backends\"")
+                .contains("\"warehouse\":\"warehouse-1\"");
+    }
+
+    @Test
+    void answersCarryTheWarehouseAndUnknownWarehousesAre404() throws Exception {
+        assertThat(send("/whoami", "application/json").headers().firstValue("X-Warehouse")).hasValue("warehouse-1");
+
+        HttpResponse<String> unknown = http.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/whoami"))
+                .header("X-Warehouse", "warehouse-9").GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(unknown.statusCode()).isEqualTo(404);
+        assertThat(unknown.body()).contains("Unknown warehouse 'warehouse-9'");
+    }
+
+    @Test
+    void warehousesEndpointListsThemAndScalingIsOffWithoutDocker() throws Exception {
+        HttpResponse<String> list = send("/gateway/warehouses", "application/json");
+        assertThat(list.statusCode()).isEqualTo(200);
+        assertThat(list.body()).contains("\"name\":\"warehouse-1\"").contains("\"database\":\"gamevault_warehouse-1\"")
+                .contains("\"replicas\":2").contains("\"scalingEnabled\":false");
+
+        HttpResponse<String> scale = http.send(HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + "/gateway/warehouses/warehouse-4"))
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString("{\"replicas\":2}")).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(scale.statusCode()).isEqualTo(501);
+        assertThat(scale.body()).contains("gateway.provisioner.enabled");
     }
 
     private HttpResponse<String> send(String path, String accept) throws Exception {

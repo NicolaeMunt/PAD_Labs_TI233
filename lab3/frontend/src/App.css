@@ -17,3 +17,25 @@ button { padding: 6px 18px; font: inherit; cursor: pointer; }
 .status.ok { color: #2e7d32; } .status.bad { color: #c62828; }
 .url { font-weight: 400; opacity: .6; margin-left: 10px; }
 pre { background: color-mix(in srgb, currentColor 8%, transparent); padding: 10px; border-radius: 6px; overflow: auto; max-height: 300px; font-size: 12px; }
+.warehouses table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+.warehouses th { text-align: left; font-weight: 600; opacity: .6; padding: 4px 6px; }
+.warehouses td { padding: 6px; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); vertical-align: middle; }
+.warehouses tr { cursor: pointer; }
+.warehouses tr.selected { background: color-mix(in srgb, #1565c0 12%, transparent); }
+.warehouses td { vertical-align: top; }
+.warehouses .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.warehouses .dbname, .warehouses .rsname { font-size: 11px; opacity: .7; margin: 2px 0 4px; }
+.warehouses .error { font-size: 11px; color: #c62828; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.warehouses .replicas { white-space: nowrap; }
+.warehouses .replicas span { display: inline-block; min-width: 46px; text-align: center; }
+.warehouses .replicas button { padding: 2px 9px; }
+.warehouses .add { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-top: 12px; }
+.warehouses .add .desc { margin: 0 0 6px; font-size: 12px; }
+.tag { font-size: 11px; margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: color-mix(in srgb, currentColor 12%, transparent); }
+.phase { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; color: #fff; margin-top: 3px; }
+.phase.READY { background: #2e7d32; } .phase.SCALING { background: #ef6c00; } .phase.DELETING { background: #6d6d6d; } .phase.ERROR { background: #c62828; }
+.chip { font-size: 11px; padding: 2px 7px; border-radius: 10px; color: #fff; white-space: nowrap; }
+.chip a { color: #fff; font-weight: 700; text-decoration: underline; }
+.chip.UP { background: #2e7d32; } .chip.STARTING { background: #ef6c00; } .chip.DOWN { background: #c62828; } .chip.DRAINING { background: #6d6d6d; }
+.chip.db.primary { background: #1b5e20; font-weight: 700; } .chip.db.secondary { background: #43a047; }
+.chip.db.syncing { background: #ef6c00; } .chip.db.bad { background: #c62828; }

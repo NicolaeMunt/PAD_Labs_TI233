@@ -1,7 +1,8 @@
 package md.utm.gateway.backend;
 
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -30,8 +31,8 @@ public class HealthChecker implements AutoCloseable {
     private final BackendClient client;
     private final GatewayProperties.Health cfg;
     private final Timeout probeTimeout;
-    /** only touched by the single health-check thread */
-    private final Map<Backend, Integer> failuresInARow = new HashMap<>();
+    /** written by the parallel probe threads of one round, so a concurrent map */
+    private final Map<Backend, Integer> failuresInARow = new ConcurrentHashMap<>();
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().name("health-check").daemon().factory());
 
@@ -48,21 +49,32 @@ public class HealthChecker implements AutoCloseable {
     }
 
     void checkAll() {
-        for (Backend b : registry.all()) {
-            String failure;
-            try {
-                int status = client.probe(b, probeTimeout);
-                failure = status == 200 ? null : "health check returned HTTP " + status;
-            } catch (Exception e) {
-                failure = "health check failed: " + e;
-            }
+        List<Backend> backends = registry.all();
+        failuresInARow.keySet().retainAll(backends);          // forget instances that were removed
 
-            if (failure == null) {
-                failuresInARow.put(b, 0);
-                registry.markUp(b);
-            } else if (failuresInARow.merge(b, 1, Integer::sum) >= cfg.failuresBeforeDown()) {
-                registry.markDown(b, failure);
+        // One virtual thread per probe: with many instances, a hanging one must not delay the
+        // others' checks by its whole timeout. close() waits until every probe has finished.
+        try (var probes = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (Backend b : backends) {
+                probes.submit(() -> check(b));
             }
+        }
+    }
+
+    private void check(Backend b) {
+        String failure;
+        try {
+            int status = client.probe(b, probeTimeout);
+            failure = status == 200 ? null : "health check returned HTTP " + status;
+        } catch (Exception e) {
+            failure = "health check failed: " + e;
+        }
+
+        if (failure == null) {
+            failuresInARow.put(b, 0);
+            registry.markUp(b);
+        } else if (failuresInARow.merge(b, 1, Integer::sum) >= cfg.failuresBeforeDown()) {
+            registry.markDown(b, failure);
         }
     }
 

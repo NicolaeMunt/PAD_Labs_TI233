@@ -37,12 +37,12 @@ class ProxyServiceTest {
         api1 = new StubBackend("api-1");
         api2 = new StubBackend("api-2");
         api3 = new StubBackend("api-3");
-        registry = new BackendRegistry(List.of(api1.uri(), api2.uri(), api3.uri()));
+        registry = BackendRegistry.of(List.of(api1.uri(), api2.uri(), api3.uri()));
         client = new BackendClient(new GatewayProperties.Pool(
                 50, 20, Duration.ofSeconds(1), Duration.ofMillis(500), Duration.ofSeconds(15)));
         cache = new InMemoryResponseCache();
         proxy = new ProxyService(registry, new RoundRobinBalancer(), client, cache,
-                new GatewayProperties.Cache(true, Duration.ofSeconds(30), List.of("/api/"), 1 << 20));
+                new GatewayProperties.Cache(true, Duration.ofSeconds(30), List.of("/api/"), 1 << 20), "warehouse-1");
     }
 
     @AfterEach

@@ -14,6 +14,11 @@ import md.utm.gateway.cache.RedisResponseCache;
 import md.utm.gateway.cache.ResponseCache;
 import md.utm.gateway.proxy.BackendClient;
 import md.utm.gateway.proxy.ProxyService;
+import md.utm.gateway.scaling.DockerProvisioner;
+import md.utm.gateway.scaling.InstanceProvisioner;
+import md.utm.gateway.scaling.MongoReplicaSet;
+import md.utm.gateway.scaling.ReplicaSet;
+import md.utm.gateway.scaling.WarehouseManager;
 
 /** Wires the gateway's parts together from {@link GatewayProperties}. */
 @Configuration
@@ -21,7 +26,29 @@ public class GatewayConfig {
 
     @Bean
     BackendRegistry backendRegistry(GatewayProperties props) {
-        return new BackendRegistry(props.backends());
+        return BackendRegistry.fromConfig(props.backends(), props.defaultWarehouse());
+    }
+
+    @Bean
+    InstanceProvisioner instanceProvisioner(GatewayProperties props) {
+        return props.provisioner().enabled()
+                ? new DockerProvisioner(props.provisioner())
+                : InstanceProvisioner.DISABLED;
+    }
+
+    @Bean(destroyMethod = "close")
+    ReplicaSet replicaSet() {
+        return new MongoReplicaSet();
+    }
+
+    /**
+     * start: takes back the containers of an earlier run, creates the initial warehouses that are
+     * missing, and starts watching the replica sets.
+     */
+    @Bean(initMethod = "start", destroyMethod = "close")
+    WarehouseManager warehouseManager(BackendRegistry registry, InstanceProvisioner provisioner,
+                                      ReplicaSet replicaSet, GatewayProperties props) {
+        return new WarehouseManager(registry, provisioner, replicaSet, props);
     }
 
     @Bean
@@ -52,6 +79,6 @@ public class GatewayConfig {
     @Bean
     ProxyService proxyService(BackendRegistry registry, LoadBalancer balancer, BackendClient client,
                               ResponseCache cache, GatewayProperties props) {
-        return new ProxyService(registry, balancer, client, cache, props.cache());
+        return new ProxyService(registry, balancer, client, cache, props.cache(), props.defaultWarehouse());
     }
 }

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import md.utm.gateway.backend.Warehouses;
 import md.utm.gateway.proxy.GatewayException;
 import md.utm.gateway.proxy.Header;
 import md.utm.gateway.proxy.ProxyRequest;
@@ -46,6 +47,7 @@ public class ProxyController {
         try {
             ProxyService.Result result = proxy.handle(toProxyRequest(in, requestId));
             out.setHeader("X-Cache", result.cacheStatus().name());
+            out.setHeader(Warehouses.HEADER, result.warehouse());
             write(result.response(), out);
         } catch (GatewayException e) {
             writeProblem(e, in.getHeader("Accept"), out);
@@ -95,6 +97,8 @@ public class ProxyController {
     private static void writeProblem(GatewayException e, String accept, HttpServletResponse out) throws IOException {
         int status = e.status();
         String title = switch (status) {
+            case 400 -> "Bad Request";
+            case 404 -> "Not Found";
             case 503 -> "Service Unavailable";
             case 504 -> "Gateway Timeout";
             default -> "Bad Gateway";
