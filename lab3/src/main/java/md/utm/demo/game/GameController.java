@@ -1,6 +1,5 @@
 package md.utm.demo.game;
 
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -16,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
 import md.utm.demo.game.dto.CreateGameRequest;
+import md.utm.demo.game.dto.GamePage;
 import md.utm.demo.game.dto.GameResponse;
 
 
@@ -30,9 +30,9 @@ public class GameController {
     }
 
     @GetMapping
-    public Page<GameResponse> list(@RequestParam(required = false) Genre genre,
+    public GamePage list(@RequestParam(required = false) Genre genre,
                                    Pageable pageable) {
-        return service.findAll(genre, pageable);
+        return GamePage.from(service.findAll(genre, pageable));
     }
 
     @GetMapping("/{id}")

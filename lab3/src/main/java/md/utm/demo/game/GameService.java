@@ -26,7 +26,9 @@ public class GameService {
                 : repository.findByGenreAndDeletedAtIsNull(genre, pageable);
         return games.map(GameResponse::from);
     }
-    @Cacheable(value = "games", key = "#id")
+    // sync = true: on a cache miss only one thread per instance loads from Mongo,
+    // the others wait and reuse the result (prevents a cache stampede)
+    @Cacheable(value = "games", key = "#id", sync = true)
     public GameResponse findById(String id) {
         return repository.findByIdAndDeletedAtIsNull(id)
                 .map(GameResponse::from)
