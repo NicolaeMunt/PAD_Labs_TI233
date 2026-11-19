@@ -27,7 +27,8 @@ const ENDPOINTS = [
   { method: 'PUT', path: '/api/games/{id}', desc: 'Update a game', fields: [idField, ...bodyFields] },
   { method: 'DELETE', path: '/api/games/{id}', desc: 'Soft-delete a game', fields: [idField] },
   { method: 'GET', path: '/whoami', desc: 'Instance id, warehouse and database', fields: [] },
-  { method: 'GET', path: '/actuator/health', desc: 'Health of app, MongoDB and Redis', fields: [] },
+  { method: 'GET', path: '/actuator/health', desc: 'Health of the gateway', fields: [] },
+  { method: 'GET', path: '/gateway/state', desc: 'Gateway: backends, connection pool, cache stats', fields: [] },
 ]
 
 function EndpointCard({ ep, lastId, onId }) {
@@ -69,7 +70,7 @@ function EndpointCard({ ep, lastId, onId }) {
       try { data = JSON.parse(text) } catch { /* keep raw text */ }
       setResult({
         status: res.status, ok: res.ok, ms: Math.round(performance.now() - t0), url,
-        instance: res.headers.get('X-Instance-Id'), data,
+        instance: res.headers.get('X-Instance-Id'), cache: res.headers.get('X-Cache'), data,
       })
       if (data && data.id) onId(data.id)
     } catch (e) {
@@ -113,6 +114,7 @@ function EndpointCard({ ep, lastId, onId }) {
         <div className="result">
           <div className={`status ${result.ok ? 'ok' : 'bad'}`}>
             {result.status} · {result.ms} ms{result.instance && ` · instance ${result.instance}`}
+            {result.cache && ` · cache ${result.cache}`}
             <span className="url">{ep.method} {result.url}</span>
           </div>
           <pre>{typeof result.data === 'string' ? result.data || '(empty body)' : JSON.stringify(result.data, null, 2)}</pre>
@@ -128,8 +130,9 @@ export default function App() {
     <main>
       <h1>GameVault API Tester</h1>
       <p className="sub">
-        Calls the Spring Boot API through the dev proxy. The id from the last response is
-        pre-filled in the id fields.
+        Calls go through the gateway, which load-balances over three API instances and caches
+        GET responses in Redis. Each result shows which instance answered and the cache status.
+        The id from the last response is pre-filled in the id fields.
       </p>
       {ENDPOINTS.map(ep => (
         <EndpointCard key={ep.method + ep.path} ep={ep} lastId={lastId} onId={setLastId} />

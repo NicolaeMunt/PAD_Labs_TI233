@@ -28,7 +28,11 @@ Every task ends with its tests. A task is done only when its tests pass.
   - Error case returns XML when XML is requested.
   - Manual: toggle in the UI and compare responses.
 
-### Task 2 – Gateway skeleton and multiple API replicas  ·  Medium  (prerequisite for 10 and 11)
+### Task 2 – Gateway skeleton and multiple API replicas  ·  Medium  (prerequisite for 10 and 11)  ·  ✅ DONE
+Implemented in [gateway/](gateway/README.md): keep-alive connection pool, Redis response cache
+(JSON/XML keyed separately, generation-based invalidation, request coalescing), round-robin or
+least-connections balancing, health checks and safe failover. Three API replicas in Docker Compose.
+
 Requirements 10 and 11 talk about a gateway, which does not exist yet.
 
 - New module `gateway/` (Spring Boot, same Java version). It exposes the same `/api/**` paths and forwards them to the API instances.

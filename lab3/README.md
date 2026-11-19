@@ -2,6 +2,14 @@
 
 Spring Boot 4 (Java 25) REST API for a catalog of video games.
 Games are stored in **MongoDB** and single-game reads are cached in **Redis**.
+Clients reach the API through a **gateway** (smart proxy) that load-balances over
+three API instances and caches responses. See [gateway/README.md](gateway/README.md).
+
+```
+client ──► gateway :8080 ──► api-1 ┐
+           (Redis cache)  ├─► api-2 ├──► MongoDB (one shared instance)
+                          └─► api-3 ┘
+```
 
 ## Run
 
@@ -9,14 +17,16 @@ Games are stored in **MongoDB** and single-game reads are cached in **Redis**.
 docker compose up --build
 ```
 
-Starts three containers: `api` (port 8080), `mongo` (27017) and `redis` (6379).
+Starts `gateway` (port 8080), `api-1`, `api-2`, `api-3` (not published; reachable only
+through the gateway), `web` (5173), `mongo` (27017) and `redis` (6379).
 Stop with `docker compose down` (add `-v` to also delete the Mongo data).
 
-Every response includes an `X-Instance-Id` header that shows which API instance answered.
+Every response includes an `X-Instance-Id` header that shows which API instance answered,
+and an `X-Cache` header (`HIT`, `MISS`, `COALESCED`, `BYPASS`) set by the gateway.
 
 ## Endpoints
 
-Base URL: `http://localhost:8080`
+Base URL: `http://localhost:8080` (the gateway; it exposes the same paths as the API)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -26,7 +36,17 @@ Base URL: `http://localhost:8080`
 | PUT | `/api/games/{id}` | Replace a game's fields. Clears its cache entry. |
 | DELETE | `/api/games/{id}` | Soft-delete a game (it is hidden, not removed). Returns `204`. |
 | GET | `/whoami` | Shows the instance id, warehouse name and database name. |
-| GET | `/actuator/health` | Health of the app, MongoDB and Redis. |
+| GET | `/actuator/health` | Health of the gateway. (Each API instance has its own, polled by the gateway.) |
+| GET | `/gateway/state` | Gateway view: backends and their health, connection pool, cache statistics. |
+
+### JSON or XML
+
+The client chooses the format with the `Accept` header; errors follow the same choice.
+
+```
+curl -H "Accept: application/xml"  localhost:8080/api/games
+curl -H "Accept: application/json" localhost:8080/api/games
+```
 
 ### Game body (POST / PUT)
 
