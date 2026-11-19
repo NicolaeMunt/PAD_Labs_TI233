@@ -38,6 +38,21 @@ Context: Spring MVC on Tomcat uses **one thread per request**, and every control
 - **Where:** `Game.softDelete()` sets `deletedAt`; queries filter `DeletedAtIsNull`.
 - **How:** a delete never removes a row another request may be reading, so readers see either the old or the new state, never a half-deleted one.
 
+### 1.6 Gateway (`gateway/`)
+Every client request runs on its own virtual thread; all gateway components are singletons shared by those threads.
+
+| Where | Mechanism | Why |
+|-------|-----------|-----|
+| `RoundRobinBalancer` | `AtomicInteger.getAndIncrement` + `floorMod` | Lock-free: every thread gets a unique ticket, so the split is exact. **Tested:** 16 threads × 3000 picks → exactly 16 000 per backend. |
+| `LeastConnectionsBalancer`, `Backend` | `AtomicInteger active`, `AtomicLong` counters, `volatile healthy` | Many threads count in-flight requests; health changes are visible at once to all threads. |
+| `BackendClient` | Apache HttpClient `PoolingHttpClientConnectionManager` | Thread-safe pool: a keep-alive connection is leased by one thread at a time and returned after the response is read. |
+| `ProxyService` coalescing | `ConcurrentHashMap.putIfAbsent(key, CompletableFuture)` | Only the first thread that misses a key calls the API; the others `join()` its future. The leader stores the answer in Redis *before* removing the future, so late threads find it cached. **Tested:** 20 concurrent misses → 1 backend call. |
+| `RedisResponseCache` | Generation counter with Redis `INCR`; `SET key value EX ttl` | Atomic in Redis, also across several gateways. The generation is read before the backend call, so a GET racing with a write stores its answer under the old generation and it is never served. |
+| `GatewayStats` | `LongAdder` | Cheap increments under heavy contention. |
+| `HealthChecker` | One scheduled thread; writes only `volatile` / atomic fields | Request threads read the health flags without locks. |
+
+**Tested:** 300 parallel requests → exactly 100/100/100 per instance, `active` back to 0 everywhere.
+
 ## 2. Known limits
 
 - **Small stale-cache window.** `@CacheEvict` runs after the method. A `GET` that read the old row from MongoDB just before an update can write it into Redis just after the evict, and it stays until the 10 minute TTL ends. `sync = true` does not close this, and the lock behind it is per instance, not across instances. A full fix needs versioned cache keys or a distributed lock; for now the TTL is the safety net.
@@ -53,7 +68,6 @@ Fixed earlier gaps: lost updates on `PUT` (1.2b), cache stampede (1.3), create r
 | Starvation guard (Task 3) | Aging of waiting requests | Low priority requests are not delayed forever. |
 | Request journal (Task 4) | `ConcurrentHashMap<requestId, entry>` with `compute` for state changes | Many threads record and update requests without locks; each state change is atomic per entry. |
 | Circuit breaker (Task 4) | Resilience4j (atomic state machine) or `AtomicReference<State>` + `AtomicInteger` failure counter | Safe state transitions CLOSED/OPEN/HALF_OPEN; only one trial request in HALF_OPEN. |
-| Round-robin (Task 2) | `AtomicInteger` counter with `getAndIncrement` | Lock-free instance selection from many threads. |
 | Timeouts and retries (Task 4) | `CompletableFuture` with timeout | A request never blocks a worker forever. |
 | DB sync (Task 5) | MongoDB replica set: primary takes writes, secondaries copy them via the oplog | Keeps the 3 databases consistent; write concern `majority` makes a write count only when most nodes have it, so a failover does not lose acknowledged writes. |
 

@@ -6,16 +6,19 @@ This document describes the system as it is today and the target architecture af
 
 ```
  Browser ──► Frontend (Vite + React, :5173)
-                │  dev proxy (/api, /whoami, /actuator)
+                │  dev proxy (/api, /whoami, /actuator, /gateway)
                 ▼
-            API (Spring Boot, :8080) ──► MongoDB (:27017)   games
-                │
-                └────────────────────► Redis   (:6379)      cache
+            Gateway (Spring Boot, :8080) ── response cache ──► Redis (:6379)
+                │  pooled keep-alive connections, round-robin, health checks, failover
+                ├──► API api-1 ┐
+                ├──► API api-2 ├──► MongoDB (:27017)   games
+                └──► API api-3 ┘──► Redis              single-game cache
 ```
 
 | Component | Technology | Role |
 |-----------|-----------|------|
 | Frontend | Vite, React | One page to test every endpoint. |
+| Gateway | Spring Boot 4, Apache HttpClient 5 | Smart proxy: keep-alive connection pool, Redis response cache, load balancing with health checks and failover. See [gateway/README.md](gateway/README.md). |
 | API | Spring Boot 4, Java 25 | REST API for the game catalog (`/api/games`, `/whoami`, `/actuator/health`). |
 | MongoDB | `mongo:8` | Stores games. Deletes are soft (a `deletedAt` field). |
 | Redis | `redis:7` | Caches single-game reads (`games` cache, 10 min TTL). Update and delete evict the entry. |
